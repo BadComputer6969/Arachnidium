@@ -1,0 +1,55 @@
+{
+  "tag": "after",
+  "blocklist": {
+    "entries": 50002,
+    "lookups": 200,
+    "old_ms": 5461.1,
+    "new_ms": 0.5,
+    "speedup": 10857.5
+  },
+  "cache_evict": {
+    "max_entries": 1000,
+    "puts": 3000,
+    "old_ms": 782.7,
+    "new_ms": 15.4,
+    "speedup": 50.8
+  },
+  "image_threshold": [
+    {
+      "px": 16,
+      "png_bytes": 852,
+      "webp_bytes": 162,
+      "shrinks": true
+    },
+    {
+      "px": 32,
+      "png_bytes": 3172,
+      "webp_bytes": 498,
+      "shrinks": true
+    },
+    {
+      "px": 64,
+      "png_bytes": 12420,
+      "webp_bytes": 1736,
+      "shrinks": true
+    },
+    {
+      "px": 128,
+      "png_bytes": 49353,
+      "webp_bytes": 6500,
+      "shrinks": true
+    },
+    {
+      "px": 256,
+      "png_bytes": 197176,
+      "webp_bytes": 25288,
+      "shrinks": true
+    },
+    {
+      "px": 512,
+      "png_bytes": 788087,
+      "webp_bytes": 99816,
+      "shrinks": true
+    }
+  ]
+}
