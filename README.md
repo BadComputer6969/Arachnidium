@@ -1,6 +1,18 @@
-## Arachnidium
+## Arachnidium — Fast Fork
 
-Data-optimizing HTTP(S) proxy, powered by [mitmproxy](https://www.mitmproxy.org/).
+**An AI-generated fast fork of [Arachnidium](https://github.com/p2r3/Arachnidium)** — the data-optimizing HTTP(S) proxy, powered by [mitmproxy](https://www.mitmproxy.org/).
+
+Everything below works as in upstream. The difference is speed: this fork reworks the hot paths so pages load fast on real hardware.
+
+### What got faster
+
+- **No more event-loop stalls**: image re-encoding (WebP/AVIF) and recompression (gzip/deflate/brotli/zstd) run on worker threads. This fixed 100% CPU on image-heavy pages. Max-mode levels tuned for speed: gzip/deflate 7, zstd 8, brotli 4.
+- **Smarter skips**: webp→webp and avif→avif re-encodes skipped, images under 1 KB pass through untouched, and responses that gain nothing from recompression keep their original wire encoding.
+- **Shared async HTTP**: one long-lived session (with connection limits) serves the Bun minifier and speculative prefetching; speculative fetches are capped at 8 concurrent with per-URL de-duplication.
+- **Faster lookups**: ad-blocklist checks walk parent domains against the set (~10,800× faster at 50k entries); the speculative cache is a bounded LRU with O(1) eviction (~51× faster).
+- **Hardened**: 42 automated tests, before/after benchmarks in `benchmarks/`, plus two correctness fixes the code needed (it didn't compile; the module couldn't be imported standalone).
+
+Full numbers: [`benchmarks/results/RESULTS.md`](benchmarks/results/RESULTS.md). The work lives on the `perf-improvements` branch.
 
 ## Setup
 
@@ -12,7 +24,7 @@ Data-optimizing HTTP(S) proxy, powered by [mitmproxy](https://www.mitmproxy.org/
 5. This is where things get a little hairy - if you want to actually use this outside of your home WiFi, you'll have to configure your network to listen for incoming VPN connections. To do this, you will have to forward **UDP** port **51820** from your home server to your router. The exact process for this is vastly different for every network and router, and it would be impossible to give a universal guide in this document, so please research this yourself. Searching for "port forward udp \<router model\>" should be enough to get you on the right track. Alternatively, call your internet service provider and ask if they can help.
 6. Connect to the VPN and visit `mitm.it` on your phone's browser. Follow the instructions there to set up the certificate authority. ***Make sure to read all of the instructions.***
 
-If you run into issues, please make sure you've followed these steps carefully. Do your own troubleshooting first to make sure the issue isn't on your end (e.g. misconfigured network). Please do not message me personally asking for help - I sadly don't have the time (or patience) to be able to assist everyone, sorry.
+If you run into issues, please make sure you've followed these steps carefully. Do your own troubleshooting first to make sure the issue isn't on your end (e.g. misconfigured network).
 
 ## Configuration
 
@@ -28,15 +40,10 @@ To run this project from source code without building it (for development purpos
 4. Run `uv run main.py`
 5. In another terminal, change directory to `bun-api` and run `bun i`, then `bun run index.ts`
 
-## Contributing
-
-Contributions are welcome, though please note that I am personally unlikely to continue working on this project in the long term. This was something that I've wanted to experiment with for a while, but unlike some of my other projects, I have little intention of actually growing this into its own thing. I might still merge pull requests from time to time, but I probably won't close issues on my own (unless it's something critical).
-
-Before submitting an issue, make sure you've read and followed the usage instructions carefully and have done your own troubleshooting. I would prefer that you do not use LLMs in submitted code, but if you do, please be transparent about it. State where an LLM was used, and explain (in your own words) what it did.
-
 ## Acknowledgements
 
 - https://www.mitmproxy.org/
 - https://github.com/rdbende/Azure-ttk-theme
+- Upstream project: https://github.com/p2r3/Arachnidium
 
 The name "Arachnidium" is a homage to nature's earliest web developers. The arachnidium is, generally, [the part of a spider's body responsible for producing webs](https://www.merriam-webster.com/dictionary/arachnidium). It also sounds really cool.
