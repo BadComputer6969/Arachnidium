@@ -412,7 +412,11 @@ async def request(flow: mitmproxy.http.HTTPFlow) -> None:
         ]
         flow.request.headers["accept-encoding"] = ", ".join(encodings)
 
-    if "image" in flow.request.headers.get("accept", ""):
+    accept_hdr = flow.request.headers.get("accept", "")
+    # Page navigations send "text/html,...,image/avif,image/webp,...".
+    # Clobbering that to image-only makes strict servers answer 406
+    # (and bot protection 403), so only narrow non-document requests.
+    if "image" in accept_hdr and "text/html" not in accept_hdr:
         flow.request.headers["accept"] = "image/webp,image/avif,image/*;q=0.8"
 
     entry = speculative_cache.pop(flow.request.pretty_url)
