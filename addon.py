@@ -24,6 +24,8 @@ import gzip
 import zlib as deflate
 import brotli as br
 import zstandard as zstd
+import socket
+import ipaddress
 
 # Outbound HTTP (Bun minifier + speculative prefetch) shares one session
 # owned by the addon, so connections are reused instead of re-established
@@ -58,6 +60,81 @@ async def close_session() -> None:
     session, _session = _session, None
     if session is not None and not session.closed:
         await session.close()
+
+
+# Retry requests over IPv6 when the origin returns 403 over IPv4
+# (IP-based block bypass). Toggle off to disable the fallback.
+V6_FALLBACK_ON_403 = True
+V6_FALLBACK_TIMEOUT = aiohttp.ClientTimeout(total=20)
+
+# IPv6-forced session for the 403 fallback. The connector resolves
+# hostnames to IPv6 only, so replayed requests egress via the box's
+# IPv6 (WireGuard tunnel) instead of the blocked IPv4.
+_v6_session: aiohttp.ClientSession | None = None
+
+
+def _make_v6_session() -> aiohttp.ClientSession:
+    connector = aiohttp.TCPConnector(
+        family=socket.AF_INET6,
+        limit=16,
+        limit_per_host=4,
+        ttl_dns_cache=300,
+    )
+    return aiohttp.ClientSession(connector=connector)
+
+
+def get_v6_session() -> aiohttp.ClientSession:
+    """Return the shared IPv6-only session, creating it if needed."""
+    global _v6_session
+    if _v6_session is None or _v6_session.closed:
+        _v6_session = _make_v6_session()
+    return _v6_session
+
+
+async def try_ipv6_fallback(flow: mitmproxy.http.HTTPFlow) -> mitmproxy.http.Response | None:
+    """
+    If the origin returned 403 over IPv4, retry the same request over IPv6.
+    Returns a replacement mitmproxy Response on success, None to keep the
+    original 403. Never raises - all failures keep the original response.
+    """
+    # Don't bypass the user's own blocklist.
+    if BLOCK_ADS and check_dns_blocklist(flow.request.pretty_host):
+        return None
+
+    # Skip only if we're sure the original was already IPv6 - otherwise
+    # try the v6 retry anyway (a parse failure shouldn't block the fallback).
+    try:
+        server_ip = ipaddress.ip_address(flow.server_conn.address[0])
+        if server_ip.version == 6:
+            return None
+    except ValueError:
+        pass
+
+    headers = {
+        k: v for k, v in flow.request.headers.items()
+        if k.lower() not in ("host", "content-length", "transfer-encoding", "connection")
+    }
+
+    try:
+        session = get_v6_session()
+        async with session.request(
+            flow.request.method,
+            flow.request.pretty_url,
+            headers=headers,
+            data=flow.request.content or None,
+            allow_redirects=False,
+            timeout=V6_FALLBACK_TIMEOUT,
+        ) as resp:
+            if resp.status == 403:
+                return None  # IPv6 is blocked too; keep the original.
+            body = await resp.read()
+            return mitmproxy.http.Response.make(
+                resp.status,
+                body,
+                dict(resp.headers),
+            )
+    except Exception:
+        return None
 
 
 with open("defaults.json", "r") as defaults_json:
@@ -579,6 +656,12 @@ def count_savings(size_before: int, size_after: int) -> None:
 
 
 async def response(flow: mitmproxy.http.HTTPFlow) -> None:
+    # IPv6 fallback: if the origin 403'd over IPv4, retry over IPv6.
+    if V6_FALLBACK_ON_403 and flow.response and flow.response.status_code == 403:
+        v6_resp = await try_ipv6_fallback(flow)
+        if v6_resp is not None:
+            flow.response = v6_resp
+
     if not (flow.response and flow.response.raw_content):
         return
 
