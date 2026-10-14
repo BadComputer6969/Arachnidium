@@ -655,7 +655,6 @@ async def response(flow: mitmproxy.http.HTTPFlow) -> None:
         flow.response.raw_content = output
         flow.response.headers.pop("content-encoding", None)
         flow.response.headers.pop("transfer-encoding", None)
-        flow.response.headers["content-type"] = "image/webp"
         flow.response.headers["content-length"] = str(len(flow.response.raw_content))
         return count_savings(size_before, len(flow.response.raw_content))
 
@@ -739,13 +738,7 @@ async def response(flow: mitmproxy.http.HTTPFlow) -> None:
     raw_output = output
     encoding = "identity"
 
-    if "gzip" in accepted_encodings:
-        raw_output = gzip.compress(output, 9 if use_max_compression else 6)
-        encoding = "gzip"
-    elif "deflate" in accepted_encodings:
-        raw_output = deflate.compress(output, 9 if use_max_compression else 6)
-        encoding = "deflate"
-    elif "br" in accepted_encodings and (
+    if "br" in accepted_encodings and (
         not is_binary_data or accepted_encodings == ["br"]
     ):
         mode = (
@@ -758,6 +751,12 @@ async def response(flow: mitmproxy.http.HTTPFlow) -> None:
     elif "zstd" in accepted_encodings:
         raw_output = zstd.compress(output, 22 if use_max_compression else 12)
         encoding = "zstd"
+    elif "gzip" in accepted_encodings:
+        raw_output = gzip.compress(output, 9 if use_max_compression else 6)
+        encoding = "gzip"
+    elif "deflate" in accepted_encodings:
+        raw_output = deflate.compress(output, 9 if use_max_compression else 6)
+        encoding = "deflate"
 
     if len(raw_output) < len(flow.response.raw_content):
         flow.response.headers["content-length"] = str(len(raw_output))
