@@ -154,6 +154,11 @@ MIN_PROCESSING_SIZE = 100
 # Images below this size are passed through: re-encoding them rarely
 # shrinks them enough to justify the CPU (see benchmarks/).
 MIN_IMAGE_PROCESSING_SIZE = 1024
+# Bound concurrent image conversions: if this many are already running,
+# new images pass through unprocessed instead of queueing up and stalling
+# everything behind them on a small box.
+IMAGE_MAX_CONCURRENT = 2
+_image_semaphore = asyncio.Semaphore(IMAGE_MAX_CONCURRENT)
 EMPTY_BODY_STATUSES = {301, 302, 304, 307, 308}
 
 ALREADY_COMPRESSED_TYPES = (
@@ -722,24 +727,32 @@ async def response(flow: mitmproxy.http.HTTPFlow) -> None:
         # Tiny images rarely shrink enough to justify a re-encode.
         if size_before < MIN_IMAGE_PROCESSING_SIZE:
             return count_savings(size_before, size_before)
-        # Prefer AVIF when the client advertises support for it. Lossless output
-        # (quality 100) stays WebP, as does anything AVIF fails to encode.
-        output = None
-        accept = flow.request.headers.get("accept") or ""
-        if USE_AVIF and IMAGE_QUALITY < 100 and "image/avif" in accept:
-          try:
-            output = convert_avif(flow.response.content)
-            flow.response.headers["content-type"] = "image/avif"
-          except Exception as e:
-            if ENABLE_DEBUG: print("AVIF conversion failed, using WebP:", e)
-        if output is None:
-          output = convert_webp(flow.response.content)
-          flow.response.headers["content-type"] = "image/webp"
-        flow.response.raw_content = output
-        flow.response.headers.pop("content-encoding", None)
-        flow.response.headers.pop("transfer-encoding", None)
-        flow.response.headers["content-length"] = str(len(flow.response.raw_content))
-        return count_savings(size_before, len(flow.response.raw_content))
+        # If the box is already converting images, pass this one through
+        # unprocessed rather than queueing: a slow image must not stall
+        # other traffic.
+        if _image_semaphore.locked():
+            if ENABLE_DEBUG:
+                print("SKIPPING image, converter saturated")
+            return count_savings(size_before, size_before)
+        async with _image_semaphore:
+            # Prefer AVIF when the client advertises support for it. Lossless output
+            # (quality 100) stays WebP, as does anything AVIF fails to encode.
+            output = None
+            accept = flow.request.headers.get("accept") or ""
+            if USE_AVIF and IMAGE_QUALITY < 100 and "image/avif" in accept:
+              try:
+                output = convert_avif(flow.response.content)
+                flow.response.headers["content-type"] = "image/avif"
+              except Exception as e:
+                if ENABLE_DEBUG: print("AVIF conversion failed, using WebP:", e)
+            if output is None:
+              output = convert_webp(flow.response.content)
+              flow.response.headers["content-type"] = "image/webp"
+            flow.response.raw_content = output
+            flow.response.headers.pop("content-encoding", None)
+            flow.response.headers.pop("transfer-encoding", None)
+            flow.response.headers["content-length"] = str(len(flow.response.raw_content))
+            return count_savings(size_before, len(flow.response.raw_content))
 
     accept_encoding_hdr = flow.request.headers.get("accept-encoding", "")
     accepted_encodings = [
